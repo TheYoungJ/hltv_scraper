@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import sqlite3
 import dbHelpers
+import datetime
 
 # populateDatabase()
 # args: NONE
@@ -18,7 +19,9 @@ def initDatabase():
                 (id INTEGER PRIMARY KEY, team1 TEXT, team1_score INTEGER, team2 TEXT, team2_score INTEGER, match_type TEXT, winner TEXT, date TEXT, link TEXT)''')
 
     #run update fucntions to populate the db with recent data
-    updateMatchHistory()
+    updateMatches()
+    #updateTeams()
+    #updateRosters()
     
     # Commit changes and close connection
     conn.commit()
@@ -29,25 +32,25 @@ def initDatabase():
 # updateMatches()
 # args: NONE
 # return: NULL
-# purpose: Update the matches table by only adding matches that are not already in it
-def updateMatchHistory():
+# purpose: Update the matches table by only adding matches that are not already in it from the past year
+def updateMatches():
     # Connect to SQLite database
     conn = sqlite3.connect('hltv_results.db')
     c = conn.cursor()
 
     offset = 0
 
-    for i in range(1):
-        url = 'https://www.hltv.org/results?offset=' + str(offset)
+    while True:
+        date = datetime.datetime.now()
+        url = 'https://www.hltv.org/results?offset={}&startDate={}-{:02d}-{:02d}&endDate={}-{:02d}-{:02d}'.format(str(offset), (date.year - 1), date.month, date.day, date.year, date.month, date.day)
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
-
         offset += 100
         numHltv = int(soup.find(class_='pagination-data').text.split()[-1])
         numDb = dbHelpers.get_num_rows('match-history')
 
-        if(numDb >= numHltv or offset >= numHltv):
-            break
+        print("getting offset: " + str(offset) + " where numHltv is: " + str(numHltv) + " and numDb is: " + str(numDb))
+        print(url)
         
         elements = soup.select('.result-con:not(.big-results), .standard-headline:not(.big-results)')
 
@@ -69,6 +72,9 @@ def updateMatchHistory():
                     winner = team2
                 link = "hltv.org" + element.find('a').get('href')
                 c.execute("INSERT INTO match_history (team1, team1_score, team2, team2_score, match_type, winner, date, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (team1, team1Score, team2, team2Score, matchType, winner, date, link))
+                
+        if(numDb >= numHltv or offset >= numHltv):
+            break
 
     conn.commit()
     conn.close()
