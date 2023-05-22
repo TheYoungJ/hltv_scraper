@@ -5,66 +5,7 @@ from selenium.webdriver.chrome.options import Options
 import sqlite3
 import dbHelpers
 import datetime
-
-# populateDatabase()
-# args: NONE
-# return: NULL
-# purpose: Initialize the database and populate it with data scraped from HLTV.org
-
-def initDatabase():
-    # Connect to SQLite database
-    conn = sqlite3.connect('hltv_results.db')
-    c = conn.cursor()
-
-    # Create the Players table
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS players (
-            player_id INTEGER PRIMARY KEY,
-            player_name TEXT,
-            date_of_birth TEXT,
-            nationality TEXT,
-            team_id INTEGER,
-            FOREIGN KEY (team_id) REFERENCES Teams(team_id)
-        )
-    ''')
-
-    # Create the PlayerStats table
-    c.execute('''
-        CREATE TABLE PlayerStats (
-            stat_id INTEGER PRIMARY KEY,
-            player_id INTEGER,
-            kills INTEGER,
-            deaths INTEGER,
-            headshot_percentage REAL,
-            damage_per_round REAL,
-            FOREIGN KEY (player_id) REFERENCES Players(player_id)
-        )
-    ''')
-
-    # Create table to store results
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS match_history
-            (id INTEGER PRIMARY KEY,
-            team1 TEXT,
-            team1_score INTEGER,
-            team2 TEXT,
-            team2_score INTEGER,
-            match_type TEXT,
-            winner TEXT,
-            date TEXT,
-            link TEXT
-        )
-    ''')
-
-    #run update fucntions to populate the db with recent data
-    updateMatches()
-    
-    # Commit changes and close connection
-    conn.commit()
-    conn.close()
-    
-
-
+  
 # updateMatches()
 # args: NONE
 # return: NULL
@@ -84,7 +25,7 @@ def updateMatches():
 
         offset += 100
         numHltv = int(soup.find(class_='pagination-data').text.split()[-1])
-        numDb = dbHelpers.get_num_rows('match-history')
+        numDb = dbHelpers.get_num_rows_matchHistory()
         
         elements = soup.select('.result-con:not(.big-results), .standard-headline:not(.big-results)')
 
@@ -104,7 +45,7 @@ def updateMatches():
                 winner = team1
                 if (team2Score > team1Score):
                     winner = team2
-                link = "hltv.org" + element.find('a').get('href')
+                link = element.find('a').get('href')
                 c.execute("INSERT INTO match_history (team1, team1_score, team2, team2_score, match_type, winner, date, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (team1, team1Score, team2, team2Score, matchType, winner, date, link))
 
         if(numDb >= numHltv or offset >= numHltv):
@@ -137,21 +78,53 @@ def updatePlayers():
 
     for player in players[1:]:
         playerName = player.find(class_='playerCol').find('a').text
-        playerTeam = player.find(class_='teamCol').get('data-sort')
+        if dbHelpers.in_table_player(playerName):
+            break
         playerNationality = player.find('img').get('title')
-        print("player: " + playerName + " " + playerTeam + " " + playerNationality)
-        break
+        playerLink = player.find(class_='playerCol').find('a').get('href').split('?')[0]
+        c.execute('INSERT INTO players (player_name, link) VALUES (?,?)', (playerName, playerLink))
+
+    conn.commit()
+    conn.close()
+        
 
 # updateTeams()
 # args: NONE
 # return: NULL
-# purpose: Update the table with all players that have played a game in the past year
+# purpose: Update the table with all teams that have played a game in the past year
+def updateTeams():
+    # Connect to SQLite database
+    conn = sqlite3.connect('hltv_results.db')
+    c = conn.cursor()
+
+    chrome_options = Options().add_argument('--headless')
+    driver = webdriver.Chrome(options=chrome_options)
+
+    date = datetime.datetime.now()
+    url = 'https://www.hltv.org/stats/teams?startDate={}-{:02d}-{:02d}&endDate={}-{:02d}-{:02d}&minMapCount=0'.format((date.year - 1), date.month, date.day, date.year, date.month, date.day)
+    driver.get(url)
+    page_source = driver.page_source
+    driver.quit()
+    soup = BeautifulSoup(page_source, 'html.parser')
+
+    table = soup.find('table', class_='player-ratings-table')
+    teams = table.find_all('tr')
+
+    for team in teams[1:]:
+        teamName = team.find(class_='teamCol-teams-overview').find('a').text
+        teamLink = team.find(class_='teamCol-teams-overview').find('a').get('href')
+        c.execute('INSERT INTO teams (team_name, link) VALUES (?, ?)', (teamName, teamLink))
+
+        
+    conn.commit()
+    conn.close()
 
 
 def main():
-    #initDatabase()
+    dbHelpers.initDatabase()
     #updateMatches()
 
     updatePlayers()
+    updateTeams()
 
 main()
